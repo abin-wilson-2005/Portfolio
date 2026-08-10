@@ -716,9 +716,95 @@ async function readEntry(dateStr) {
     }
     document.getElementById("statStreak").textContent = streak;
   }
+  var calendarRenderToken = 0;
+ async function renderCalendar() {
+  var myToken = ++calendarRenderToken;
 
-  async function renderCalendar() {
-    var year = viewDate.getFullYear(), month = viewDate.getMonth();
+  var year = viewDate.getFullYear();
+  var month = viewDate.getMonth();
+
+  document.getElementById("trkMonthLabel").textContent =
+    MONTH_NAMES[month] + " " + year;
+
+  var grid = document.getElementById("trkGrid");
+
+  // Clear the old calendar immediately
+  grid.innerHTML = "";
+
+  var firstWeekday = new Date(year, month, 1).getDay();
+  var daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Add empty cells before day 1
+  for (var i = 0; i < firstWeekday; i++) {
+    var empty = document.createElement("div");
+    empty.className = "trk-cell trk-cell-empty";
+    grid.appendChild(empty);
+  }
+
+  // Create all date cells in correct order FIRST
+  var cells = [];
+
+  for (var d = 1; d <= daysInMonth; d++) {
+    var date = new Date(year, month, d);
+    var dStr = dateKey(date);
+
+    var cell = document.createElement("button");
+    cell.className = "trk-cell";
+    cell.type = "button";
+
+    if (date.toDateString() === today.toDateString()) {
+      cell.classList.add("trk-cell-today");
+    }
+
+    var dateSpan = document.createElement("span");
+    dateSpan.className = "trk-date";
+    dateSpan.textContent = d;
+
+    cell.appendChild(dateSpan);
+
+    cell.addEventListener("click", function (dateStrCopy) {
+      return function () {
+        openDay(dateStrCopy);
+      };
+    }(dStr));
+
+    grid.appendChild(cell);
+
+    cells.push({
+      cell: cell,
+      dateStr: dStr
+    });
+  }
+
+  // Load routines after the calendar numbers are already in place
+  var entries = await Promise.all(
+    cells.map(function (item) {
+      return readEntry(item.dateStr);
+    })
+  );
+
+  // Ignore an old render if the user changed month meanwhile
+  if (myToken !== calendarRenderToken) {
+    return;
+  }
+
+  // Add routine status dots
+  cells.forEach(function (item, index) {
+    var entry = entries[index];
+
+    if (entry) {
+      var dot = document.createElement("span");
+      dot.className = "trk-dot";
+
+      dot.style.background =
+        (STATUS[entry.status] || STATUS.not_started).color;
+
+      item.cell.appendChild(dot);
+    }
+  });
+
+  await renderStats();
+}
     document.getElementById("trkMonthLabel").textContent = MONTH_NAMES[month] + " " + year;
 
     var grid = document.getElementById("trkGrid");
