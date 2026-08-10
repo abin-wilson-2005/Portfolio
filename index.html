@@ -528,9 +528,17 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outl
     </div>
   </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function () {
   "use strict";
+var SUPABASE_URL = "https://omrijaishqhvwhcjacvw.supabase.co";
+var SUPABASE_PUBLISHABLE_KEY = "sb_publishable_sGnWD63wRhwk3Jmw83T5cA_45LCmCK9";
+
+var supabaseClient = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY
+);
 
   /* ---------- Theme toggle ---------- */
   var html = document.documentElement;
@@ -622,60 +630,94 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outl
 
   function pad(n) { return String(n).padStart(2, "0"); }
   function dateKey(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  
+async function readEntry(dateStr) {
+    var result = await supabaseClient
+        .from("routines")
+        .select("routine")
+        .eq("date", dateStr)
+        .maybeSingle();
 
-  function readEntry(dateStr) {
-    try {
-      var raw = window.localStorage.getItem("progress:" + dateStr);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
-  }
-  function writeEntry(dateStr, value) {
-    window.localStorage.setItem("progress:" + dateStr, JSON.stringify(value));
-  }
-  function removeEntry(dateStr) {
-    window.localStorage.removeItem("progress:" + dateStr);
-  }
-  function monthEntries(year, month) {
-    var prefix = "progress:" + year + "-" + pad(month + 1);
-    var out = [];
-    try {
-      for (var i = 0; i < window.localStorage.length; i++) {
-        var k = window.localStorage.key(i);
-        if (k && k.indexOf(prefix) === 0) {
-          var raw = window.localStorage.getItem(k);
-          if (raw) {
-            try { out.push([k.replace("progress:", ""), JSON.parse(raw)]); } catch (e) {}
-          }
-        }
-      }
-    } catch (e) {}
-    return out;
-  }
+    if (result.error) {
+        console.error("Error reading routine:", result.error);
+        return null;
+    }
 
-  var weekdaysEl = document.getElementById("trkWeekdays");
-  WEEKDAYS.forEach(function (w) {
-    var d = document.createElement("div");
-    d.className = "trk-weekday";
-    d.textContent = w;
-    weekdaysEl.appendChild(d);
-  });
+    return result.data ? result.data.routine : null;
+}
+  async function writeEntry(dateStr, value) {
+    var result = await supabaseClient
+        .from("routines")
+        .upsert(
+            {
+                date: dateStr,
+                routine: value,
+                updated_at: new Date().toISOString()
+            },
+            {
+                onConflict: "date"
+            }
+        );
 
-  function renderStats() {
+    if (result.error) {
+        throw result.error;
+    }
+}
+  async function removeEntry(dateStr) {
+    var result = await supabaseClient
+        .from("routines")
+        .delete()
+        .eq("date", dateStr);
+
+    if (result.error) {
+        throw result.error;
+    }
+}
+  async function monthEntries(year, month) {
+    var startDate =
+        year + "-" + pad(month + 1) + "-01";
+
+    var nextMonth = new Date(year, month + 1, 1);
+
+    var endDate =
+        nextMonth.getFullYear() +
+        "-" +
+        pad(nextMonth.getMonth() + 1) +
+        "-01";
+
+    var result = await supabaseClient
+        .from("routines")
+        .select("date, routine")
+        .gte("date", startDate)
+        .lt("date", endDate)
+        .order("date");
+
+    if (result.error) {
+        console.error("Error loading month:", result.error);
+        return [];
+    }
+
+    return result.data.map(function (row) {
+        return [row.date, row.routine];
+    });
+}
+
+  async function renderStats() {
     var year = viewDate.getFullYear(), month = viewDate.getMonth();
-    var entries = monthEntries(year, month);
+    var entries = await monthEntries(year, month);
     document.getElementById("statLogged").textContent = entries.length;
     document.getElementById("statCompleted").textContent = entries.filter(function (e) { return e[1].status === "completed"; }).length;
 
     var streak = 0;
     var cursor = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    while (readEntry(dateKey(cursor))) {
+    while (await readEntry(dateKey(cursor))) {
       streak++;
       cursor.setDate(cursor.getDate() - 1);
     }
     document.getElementById("statStreak").textContent = streak;
   }
 
-  function renderCalendar() {
+  async function renderCalendar() {
     var year = viewDate.getFullYear(), month = viewDate.getMonth();
     document.getElementById("trkMonthLabel").textContent = MONTH_NAMES[month] + " " + year;
 
@@ -692,7 +734,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outl
     for (var d = 1; d <= daysInMonth; d++) {
       var date = new Date(year, month, d);
       var dStr = dateKey(date);
-      var entry = readEntry(dStr);
+      var entry = await readEntry(dStr);
       var isToday = date.toDateString() === today.toDateString();
 
       var cell = document.createElement("button");
@@ -717,7 +759,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outl
 
       grid.appendChild(cell);
     }
-    renderStats();
+    await renderStats();
   }
 
   document.getElementById("prevMonth").addEventListener("click", function () {
@@ -747,9 +789,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outl
     chip.addEventListener("click", function () { setStatusChip(chip.getAttribute("data-status")); });
   });
 
-  function openDay(dateStr) {
+  async function openDay(dateStr) {
     selectedDateStr = dateStr;
-    var entry = readEntry(dateStr);
+    var entry = await readEntry(dateStr);
     var d = new Date(dateStr + "T00:00:00");
     document.getElementById("trkPanelDate").textContent = d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
     setStatusChip(entry ? entry.status : "in_progress");
@@ -765,7 +807,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outl
   overlay.addEventListener("click", function (e) { if (e.target === overlay) closePanel(); });
   panel.addEventListener("click", function (e) { e.stopPropagation(); });
 
-  document.getElementById("trkSave").addEventListener("click", function () {
+  document.getElementById("trkSave").addEventListener("click", async function () {
     if (!selectedDateStr) return;
     var hoursVal = document.getElementById("trkHours").value;
     var value = {
@@ -775,7 +817,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outl
       updatedAt: new Date().toISOString(),
     };
     try {
-      writeEntry(selectedDateStr, value);
+      await writeEntry(selectedDateStr, value);
       closePanel();
       renderCalendar();
     } catch (e) {
@@ -784,10 +826,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outl
     }
   });
 
-  document.getElementById("trkClear").addEventListener("click", function () {
+  document.getElementById("trkClear").addEventListener("click", async function () {
     if (!selectedDateStr) return;
     try {
-      removeEntry(selectedDateStr);
+      await removeEntry(selectedDateStr);
       closePanel();
       renderCalendar();
     } catch (e) {
